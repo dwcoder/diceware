@@ -2,12 +2,13 @@ from __future__ import unicode_literals
 import datetime
 import os
 import pytest
+import re
 import sys
 from io import StringIO
 from diceware import (
-    WORDLISTS_DIR, RE_LANG_CODE, SPECIAL_CHARS, get_wordlist,
-    get_wordlist_path, insert_special_char, get_passphrase,
+    WORDLISTS_DIR, SPECIAL_CHARS, insert_special_char, get_passphrase,
     handle_options, main, __version__, print_version, get_random_sources,
+    get_wordlist_names
     )
 
 
@@ -22,68 +23,7 @@ class FakeRandom(object):
         return elems[num]
 
 
-@pytest.fixture(scope="function")
-def argv_handler(request):
-    """This fixture restores sys.argv and sys.stdin after tests.
-    """
-    _argv_stored = sys.argv
-    _stdin_stored = sys.stdin
-
-    def teardown():
-        sys.argv = _argv_stored
-        sys.stdin = _stdin_stored
-    request.addfinalizer(teardown)
-
-
-class Test_GetWordList(object):
-
-    def test_get_wordlist_en(self):
-        # we can get a list of words out of english wordlist.
-        en_src = os.path.join(WORDLISTS_DIR, 'wordlist_en.txt')
-        with open(en_src, 'r') as fd:
-            en_result = get_wordlist(fd)
-        assert en_result[0] == 'a'
-        assert en_result[-1] == '@'
-        assert len(en_result) == 8192
-
-    def test_get_wordlist_simple(self, tmpdir):
-        # simple wordlists can be created
-        in_file = tmpdir.mkdir("work").join("mywordlist")
-        in_file.write("a\nb\n")
-        with open(in_file.strpath, 'r') as fd:
-            result = get_wordlist(fd)
-        assert ['a', 'b'] == result
-
-    def test_get_wordlist_ignore_empty_lines(self, tmpdir):
-        # we ignore empty lines in wordlists
-        in_file = tmpdir.mkdir("work").join("mywordlist")
-        in_file.write("\n\na\n\n")
-        with open(in_file.strpath, 'r') as fd:
-            result = get_wordlist(fd)
-        assert ['a'] == result
-
-    def test_get_wordlist_closes_fd(self, tmpdir):
-        # we close passed-in file descriptors
-        in_file = tmpdir.join("somewordlist")
-        in_file.write("aaa\nbbb\n")
-        with open(in_file.strpath, 'r') as fd:
-            get_wordlist(fd)
-            assert fd.closed is True
-
-
 class TestDicewareModule(object):
-
-    def test_re_lang_code(self):
-        # RE_LANG_CODE really works
-        # valid stuff
-        assert RE_LANG_CODE.match('de') is not None
-        assert RE_LANG_CODE.match('DE') is not None
-        assert RE_LANG_CODE.match('vb') is not None
-        # invalid stuff
-        assert RE_LANG_CODE.match('de_DE') is None
-        assert RE_LANG_CODE.match('u1') is None
-        assert RE_LANG_CODE.match('u') is None
-        assert RE_LANG_CODE.match('dea') is None
 
     def test_get_random_sources(self):
         # we can get a dict of random sources registered as entry_points.
@@ -92,24 +32,6 @@ class TestDicewareModule(object):
         assert len(sources_dict) > 0
         assert 'system' in sources_dict
         assert isinstance(sources_dict['system'], type)
-
-    def test_get_wordlist_path(self):
-        # we can get valid wordlist paths
-        assert os.path.exists(get_wordlist_path('en'))
-        assert not os.path.exists(get_wordlist_path('zz'))
-
-    def test_get_wordlist_path_requires_ascii(self):
-        # non ASCII alphabet chars are not accepted in language specifier
-        with pytest.raises(ValueError) as exc_info:
-            get_wordlist_path('../../tmp')
-        assert exc_info.value.args[0].startswith(
-            'Not a valid language code')
-
-    def test_get_wordlist_path_loweres_country_code(self):
-        # upper case country codes are lowered
-        assert os.path.basename(get_wordlist_path('de')) == 'wordlist_de.txt'
-        assert os.path.basename(get_wordlist_path('De')) == 'wordlist_de.txt'
-        assert os.path.basename(get_wordlist_path('DE')) == 'wordlist_de.txt'
 
     def test_insert_special_char(self):
         # we can insert special chars in words.
@@ -192,9 +114,10 @@ class TestDicewareModule(object):
     def test_print_version_current_year(self, capsys):
         # in version infos we display the current year
         print_version()
-        expected = '(C) %s' % (datetime.datetime.now().year)
+        pattern = ".*\(C\) (20[0-9]{2}, )*%s.*" % (
+            datetime.datetime.now().year)
         out, err = capsys.readouterr()
-        assert expected in out
+        assert re.match(pattern, out, re.M + re.S) is not None
 
     def test_handle_options(self):
         # we can get help
@@ -212,6 +135,7 @@ class TestDicewareModule(object):
         assert options.version is False
         assert options.delimiter == ""
         assert options.randomsource == "system"
+        assert options.wordlist == "en"
 
     def test_handle_options_infile(self, tmpdir):
         # we can give an infile
@@ -253,6 +177,37 @@ class TestDicewareModule(object):
         assert out == ''
         assert "invalid choice" in err
 
+    def test_handle_options_wordlist(self, capsys):
+        # we can pick a wordlist
+        wordlist_names = get_wordlist_names()
+        for name in wordlist_names:
+            options = handle_options(['-w', name])
+            assert options.wordlist == name
+            options = handle_options(['--wordlist', name])
+            assert options.wordlist == name
+
+    def test_handle_options_wordlist_rejects_invalid(self, capsys):
+        # we can choose only existing wordlists
+        with pytest.raises(SystemExit):
+            handle_options(['-w', 'not-a-valid-wordlist-name'])
+        out, err = capsys.readouterr()
+        assert out == ''
+        assert "invalid choice" in err
+
+    def test_handle_options_considers_configfile(self, home_dir):
+        # defaults from a local configfile are respected
+        config_file = home_dir / ".diceware.ini"
+        config_file.write("\n".join(
+            ["[diceware]",
+             "num = 3",
+             "caps = off",
+             "delimiter = my-delim",
+             ""]))
+        options = handle_options([])
+        assert options.num == 3
+        assert options.delimiter == "my-delim"
+        assert options.caps is False
+
     def test_main(self, capsys):
         # we can get a passphrase
         main([])  # call with default options in place
@@ -273,6 +228,8 @@ class TestDicewareModule(object):
             os.path.dirname(__file__), 'exp_help_output.txt')
         with open(expected_path, 'r') as fd:
             expected_output = fd.read()
+        out = out.replace(WORDLISTS_DIR, "<WORDLISTS-DIR>")
+        out = out.replace("\n<WORDLISTS-DIR>", " <WORDLISTS-DIR>")
         assert out == expected_output
 
     def test_main_version(self, argv_handler, capsys):
@@ -324,3 +281,12 @@ class TestDicewareModule(object):
         out, err = capsys.readouterr()
         specials = [x for x in out if x in SPECIAL_CHARS]
         assert len(specials) > 0
+
+    def test_main_wordlist(self, argv_handler, capsys, wordlists_dir):
+        # we can pick the wordlist we prefer
+        wordlists_dir.join('wordlist_foo.txt').write("foo\n")
+        wordlists_dir.join('wordlist_bar.asc').write("bar\n")
+        sys.argv = ['diceware', '-w', 'foo']
+        main()
+        out, err = capsys.readouterr()
+        assert out == 'FooFooFooFooFooFoo\n'

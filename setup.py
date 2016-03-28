@@ -22,7 +22,7 @@ class PyTest(TestCommand):
         # import here, cause outside the eggs aren't loaded
         import pytest
         errno = pytest.main(self.pytest_args)
-        sys.exit(errno)
+        sys.exit(errno)                                # pragma: no cover
 
 
 def read(fname):
@@ -33,9 +33,9 @@ install_requires = [
     ]
 
 tests_require = [
-    'pytest >= 2.0.3',
-    'pytest-xdist',
-    'pytest-cov',
+    # See tox.ini
+    'pytest >=2.8.3',
+    'coverage',
     ]
 
 docs_require = [
@@ -44,7 +44,7 @@ docs_require = [
 
 setup(
     name="diceware",
-    version="0.5.dev0",
+    version="0.6.2.dev0",
     author="Uli Fouquet",
     author_email="uli@gnufix.de",
     description=(
@@ -74,6 +74,7 @@ setup(
         "Programming Language :: Python :: 3.2",
         "Programming Language :: Python :: 3.3",
         "Programming Language :: Python :: 3.4",
+        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
     ],

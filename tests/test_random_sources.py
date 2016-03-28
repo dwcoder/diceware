@@ -196,6 +196,21 @@ class TestRealDiceRandomSource(object):
         assert picked == 1
         out, err = capsys.readouterr()
         assert "entropy is reduced" in out
+        assert "Using only first 6 of 7 words" in out
+        assert err == ""
+
+    def test_no_hint_if_entropy_is_not_decreased(self, monkeypatch, capsys):
+        # we do not issue the entropy warning if not neccessary
+        self.fake_input_values(["1"] * 6, monkeypatch)
+        src = RealDiceRandomSource(None)
+        picked1 = src.choice([1, 2, 3, 4, 5, 6])
+        picked2 = src.choice(range(1, 6 ** 2 + 1))
+        picked3 = src.choice(range(1, 6 ** 3 + 1))
+        assert picked1 == 1
+        assert picked2 == 1
+        assert picked3 == 1
+        out, err = capsys.readouterr()
+        assert "entropy is reduced" not in out
         assert err == ""
 
     def test_non_numbers_as_input_are_rejected(self, monkeypatch):
@@ -210,3 +225,41 @@ class TestRealDiceRandomSource(object):
         src = RealDiceRandomSource(None)
         with pytest.raises(ValueError):
             assert src.choice([1, 2, 3, 4, 5])  # list len < 6
+
+    def test_choice_input_lower_value_borders(self, monkeypatch):
+        # choice() does not accept "0" but it accepts "1"
+        self.fake_input_values(["0", "1"], monkeypatch)
+        src = RealDiceRandomSource(None)
+        sequence = (1, 2, 3, 4, 5, 6)
+        assert src.choice(sequence) == 1
+
+    def test_choice_input_upper_value_borders(self, monkeypatch):
+        # choice() does not accept "7" but it accepts "6"
+        self.fake_input_values(["7", "6"], monkeypatch)
+        src = RealDiceRandomSource(None)
+        sequence = (1, 2, 3, 4, 5, 6)
+        assert src.choice(sequence) == 6
+
+    def test_pre_check_no_rolls_cause_exception(self):
+        # we cannot pick zero items of a sequence
+        src = RealDiceRandomSource(None)
+        with pytest.raises(ValueError):
+            src.pre_check(0, list(range(6)))
+
+    def test_pre_check_warn_if_not_all_seq_items_used(self, capsys):
+        # we issue a warning if not all sequence items will be used
+        src = RealDiceRandomSource(None)
+        src.dice_sides = 10
+        src.pre_check(1, list(range(10)))
+        out, err = capsys.readouterr()
+        assert "entropy is reduced" not in out
+        src.pre_check(1, list(range(11)))
+        out, err = capsys.readouterr()
+        assert "entropy is reduced" in out
+
+    def test_pre_check_requests_rolling_dice(self, capsys):
+        # we request the user to roll dice
+        src = RealDiceRandomSource(None)
+        src.pre_check(5, ['doesntmatter'])
+        out, err = capsys.readouterr()
+        assert "Please roll 5 dice (or a single dice 5 times)." in out

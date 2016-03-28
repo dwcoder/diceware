@@ -16,21 +16,15 @@
 """diceware -- rememberable passphrases
 """
 import argparse
-import os
 import pkg_resources
-import re
 import sys
 from random import SystemRandom
+from diceware.config import get_config_dict
+from diceware.wordlist import (
+    WordList, get_wordlist_path, WORDLISTS_DIR, get_wordlist_names,
+    )
 
 __version__ = pkg_resources.get_distribution('diceware').version
-
-#: The directory in which wordlists are stored
-WORDLISTS_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), 'wordlists'))
-
-#: A regular expression matching 2 consecutive ASCII chars. We
-#: consider this to represent some language/country code.
-RE_LANG_CODE = re.compile('^[a-zA-Z]{2}$')
 
 #: Special chars inserted on demand
 SPECIAL_CHARS = r"~!#$%^&*()-=+[]\{}:;" + r'"' + r"'<>?/0123456789"
@@ -58,7 +52,7 @@ def print_version():
     """Output current version and other infos.
     """
     print("diceware %s" % __version__)
-    print("Copyright (C) 2015 Uli Fouquet")
+    print("Copyright (C) 2015, 2016 Uli Fouquet")
     print("diceware is based on suggestions of Arnold G. Reinhold.")
     print("See http://diceware.com for details.")
 
@@ -87,7 +81,12 @@ def handle_options(args):
     """Handle commandline options.
     """
     random_sources = get_random_sources().keys()
-    parser = argparse.ArgumentParser(description="Create a passphrase")
+    wordlist_names = get_wordlist_names()
+    defaults = get_config_dict()
+    parser = argparse.ArgumentParser(
+        description="Create a passphrase",
+        epilog="Wordlists are stored in %s" % WORDLISTS_DIR
+        )
     parser.add_argument(
         '-n', '--num', default=6, type=int,
         help='number of words to concatenate. Default: 6')
@@ -111,6 +110,13 @@ def handle_options(args):
             "Get randomness from this source. Possible values: `%s'. "
             "Default: system" % "', `".join(sorted(random_sources))))
     parser.add_argument(
+        '-w', '--wordlist', default='en', choices=wordlist_names,
+        metavar="NAME",
+        help=(
+            "Use words from this wordlist. Possible values: `%s'. "
+            "Wordlists are stored in the folder displayed below. "
+            "Default: en" % "', `".join(wordlist_names)))
+    parser.add_argument(
         'infile', nargs='?', metavar='INFILE', default=None,
         type=argparse.FileType('r'),
         help="Input wordlist. `-' will read from stdin.",
@@ -119,39 +125,9 @@ def handle_options(args):
         '--version', action='store_true',
         help='output version information and exit.',
         )
-    parser.set_defaults(capitalize=True)
+    parser.set_defaults(**defaults)
     args = parser.parse_args(args)
     return args
-
-
-def get_wordlist(file_descriptor):
-    """Parse file in `file_descriptor` and build a word list of it.
-
-    `file_descriptor` is expected to be a file descriptor, already
-    opened for reading. The descriptor will be closed after
-    processing.
-
-    A wordlist is expected to contain lines of words. Each line a
-    word. Empty lines are ignored. Returns a list of terms (lines)
-    found.
-    """
-    result = [
-        line.strip() for line in file_descriptor.readlines()
-        if line.strip() != '']
-    file_descriptor.close()
-    return result
-
-
-def get_wordlist_path(lang):
-    """Get path to a wordlist file for language `lang`.
-
-    The `lang` string is a 2-char country code. Invalid codes raise a
-    ValueError.
-    """
-    if not RE_LANG_CODE.match(lang):
-        raise ValueError("Not a valid language code: %s" % lang)
-    basename = 'wordlist_%s.txt' % lang
-    return os.path.join(WORDLISTS_DIR, basename.lower())
 
 
 def insert_special_char(word, specials=SPECIAL_CHARS, rnd=None):
@@ -172,13 +148,15 @@ def insert_special_char(word, specials=SPECIAL_CHARS, rnd=None):
 def get_passphrase(options=None):
     """Get a diceware passphrase.
 
-    The passphrase returned will contain `options.num` words deliimted by
-    `options.delimiter`.
+    `options` is a set of arguments as provided by
+    `argparse.OptionParser.parse_args()`.
 
-    The passphrase returned will contain `options.specials` special chars.
+    The passphrase returned will contain `options.num` words deliimted by
+    `options.delimiter` and `options.specials` special chars.
 
     For the passphrase generation we will use the random source
-    registered under the name `options.randomsource`.
+    registered under the name `options.randomsource` (something like
+    "system" or "dice").
 
     If `options.capitalize` is ``True``, all words will be capitalized.
 
@@ -189,11 +167,11 @@ def get_passphrase(options=None):
     if options is None:
         options = handle_options(args=[])
     if options.infile is None:
-        options.infile = open(get_wordlist_path("en"), 'r')
-    word_list = get_wordlist(options.infile)
+        options.infile = open(get_wordlist_path(options.wordlist), 'r')
+    word_list = WordList(options.infile)
     rnd_source = get_random_sources()[options.randomsource]
     rnd = rnd_source(options)
-    words = [rnd.choice(word_list) for x in range(options.num)]
+    words = [rnd.choice(list(word_list)) for x in range(options.num)]
     if options.capitalize:
         words = [x.capitalize() for x in words]
     result = options.delimiter.join(words)

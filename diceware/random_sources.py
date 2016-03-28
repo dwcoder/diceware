@@ -1,5 +1,5 @@
 #  diceware -- passphrases to remember
-#  Copyright (C) 2015  Uli Fouquet and contributors.
+#  Copyright (C) 2015, 2016  Uli Fouquet and contributors.
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -42,21 +42,19 @@ generate.
 Finally, to register the source, add some stanza in `setup.py` of your
 project that looks like::
 
-    ...
+    # ...
     setup(
-        ...
+        # ...
         entry_points={
-            'console_scripts': [
-                'diceware = diceware:main',
-            ],
+            # console scripts and other entry points...
             'diceware_random_sources': [
                 'myrandom = mypkg.mymodule:MyRandomSource',
                 'myothersrc = mypkg.mymodule:MyOtherSource',
             ],
         },
-        ...
+        # ...
     )
-    ...
+    # ...
 
 Here the `myrandom` and `myothersrc` lines register random sources that
 (if installed) `diceware` will find on startup and offer to users under
@@ -125,21 +123,40 @@ class RealDiceRandomSource(object):
     """
     def __init__(self, options):
         self.options = options
+        self.dice_sides = 6
 
-    def choice(self, sequence):
-        num_rolls = int(math.log(len(sequence), 6))
+    def pre_check(self, num_rolls, sequence):
+        """Checks performed before picking an item of a sequence.
+
+        We make sure that `num_rolls`, the number of rolls, is in an
+        acceptable range and issue an hint about the procedure.
+        """
         if num_rolls < 1:
-            raise ValueError("Must provide at least 6 items")
-        if 6 ** num_rolls < len(sequence):
-            print("Warning: entropy is reduced!")
+            raise ValueError(
+                "Must provide at least %s items" % self.dice_sides)
+        if (self.dice_sides ** num_rolls) < len(sequence):
+            print(
+                "Warning: entropy is reduced! Using only first %s of %s "
+                "words/items of your wordlist." % (
+                    self.dice_sides ** num_rolls, len(sequence)
+                )
+            )
         print(
             "Please roll %s dice (or a single dice %s times)." % (
                 num_rolls, num_rolls))
+        return
+
+    def choice(self, sequence):
+        """Pick one item out of `sequence`.
+        """
+        num_rolls = int(math.log(len(sequence), self.dice_sides))
+        self.pre_check(num_rolls, sequence)
         result = 0
         for i in range(num_rolls, 0, -1):
             rolled = None
-            while rolled not in ["1", "2", "3", "4", "5", "6"]:
+            while rolled not in [
+                    str(x) for x in range(1, self.dice_sides + 1)]:
                 rolled = input_func(
                     "What number shows dice number %s? " % (num_rolls - i + 1))
-            result += ((6 ** (i - 1)) * (int(rolled) - 1))
+            result += ((self.dice_sides ** (i - 1)) * (int(rolled) - 1))
         return sequence[result]
